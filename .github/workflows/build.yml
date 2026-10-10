@@ -12,7 +12,18 @@ jobs:
           distribution: temurin
           java-version: 21
           cache: maven
+      - name: Fix folder layout
+        run: |
+          mkdir -p src/main/java/dev/fakecrowd src/main/resources
+          for f in $(find . -name "*.java" -not -path "./.git/*" -not -path "./src/main/java/dev/fakecrowd/*"); do mv "$f" src/main/java/dev/fakecrowd/; done
+          for n in config.yml plugin.yml; do
+            p=$(find . -name "$n" -not -path "./.git/*" -not -path "./src/main/resources/*" -not -path "./.github/*" | head -n1)
+            if [ -n "$p" ]; then mv "$p" src/main/resources/; fi
+          done
+          find . -path ./.git -prune -o -type f -print
       - run: mvn -B clean package
+      - name: Show jar contents
+        run: unzip -l target/FakeCrowd.jar
       - uses: actions/upload-artifact@v4
         with:
           name: FakeCrowd-jar
