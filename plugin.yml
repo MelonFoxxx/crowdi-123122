@@ -1,0 +1,15 @@
+name: FakeCrowd
+version: 1.0.0
+main: dev.fakecrowd.FakeCrowd
+api-version: '1.21'
+depend: [ProtocolLib]
+description: Fake players in tab, fluctuating server-list online and AI chat replies.
+commands:
+  fakecrowd:
+    description: FakeCrowd admin command
+    usage: /fakecrowd <reload|status>
+    aliases: [fc]
+    permission: fakecrowd.admin
+permissions:
+  fakecrowd.admin:
+    default: op

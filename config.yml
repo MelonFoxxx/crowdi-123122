@@ -1,0 +1,138 @@
+# ===================== FakeCrowd =====================
+
+# --- Онлайн у списку серверів (мультиплеєр -> меню серверів) ---
+online:
+  enabled: true
+  target: 15          # СЕРЕДНІЙ онлайн, який бачитимуть у списку серверів
+  variation: 4        # онлайн плаватиме в межах target ± variation
+  update-seconds-min: 40    # як часто число трохи змінюється
+  update-seconds-max: 150
+  # показувати фейків у підказці (наведення на онлайн) у списку серверів
+  show-fake-in-sample: true
+
+# --- Фейкові гравці (видно в табі) ---
+fake-players:
+  count-min: 2
+  count-max: 3
+  min-session-minutes: 15    # скільки "сидить" на сервері
+  max-session-minutes: 80
+  announce-join-leave: true  # писати "X joined the game" / "X left the game"
+  ping-min: 25               # пінг у табі (смужка зв'язку)
+  ping-max: 95
+  override-list-command: true  # /list теж показує фейків
+
+# --- Поведінка в чаті ---
+chat:
+  format: "<%name%> %msg%"       # має збігатися з форматом чату твого сервера!
+  reply-chance: 0.30             # шанс відповісти на звичайне повідомлення
+  mention-reply-chance: 0.90     # шанс відповісти, якщо в повідомленні є нік фейка
+  global-cooldown-seconds: 25    # мінімум між відповідями фейків
+  per-fake-cooldown-seconds: 60
+  private-reply-chance: 0.80     # відповідь на /msg фейку
+  join-greet-chance: 0.35        # привітати реального гравця, що зайшов
+  idle-chat:
+    enabled: true
+    chance: 0.15                 # перевірка кожні 20с
+    min-silence-seconds: 180     # балакають самі, якщо в чаті тихо
+
+# --- Вбудований "ШІ" (працює всередині плагіна, нічого додатково ставити не треба) ---
+brain:
+  learn-from-chat: true          # вчитися з реального чату (файл plugins/FakeCrowd/learned.txt)
+  max-learned-pairs: 1500
+  use-learned-chance: 0.6        # шанс відповісти вивченою фразою, якщо правило не спрацювало
+  generic-reply-chance: 0.4      # шанс відповісти "лол/ага", якщо нічого кращого немає
+  # слова (початок слова), які НЕ вчимо. Додай сюди мати, рекламу, назви чужих серверів тощо
+  blocked-words: [admin, адмін, админ, донат, donat, ip, discord, дискорд, привілег, http]
+  # Правила: match - регулярка; далі списки відповідей для мов uk/ru/en/pl
+  intents:
+    - match: '^(прив\S*|хай|здоров\S*|віта\S*|ку|hi+|hello|hey|yo|добр\S*|здарова|прівіт)(\s.*)?$'
+      uk: ["привіт", "ку", "хай", "o/", "здоров", "прив)"]
+      ru: ["привет", "ку", "хай", "здарова"]
+      en: ["hi", "hey", "yo", "sup"]
+    - match: '(\bти\b.*\b(бот|ші)\b|\bты\b.*\b(бот|ии)\b|are you .*(bot|ai)|\b(бот|ботом)\s*\?)'
+      uk: ["ні лол", "сам бот", "чого це", "та ні)", "шо?", "ахах ні"]
+      ru: ["нет лол", "сам бот", "чего это", "чё?"]
+      en: ["no lol", "u r the bot", "what? no", "nah"]
+    - match: '(як (ти|справи|діла)|шо як|що нового|как дела|как ты|how are you|wassup|what.?s up)'
+      uk: ["норм", "та норм, ти як?", "нормально", "та ок", "та так собі"]
+      ru: ["норм", "нормально, ты как?", "та ок"]
+      en: ["good u?", "all good", "same old"]
+    - match: '(дякую|дяки|спс|спасибо|thx|thanks|thank you)'
+      uk: ["нема за що", "та нема проблем", "ага)", "бувай)"]
+      ru: ["не за что", "обращайся"]
+      en: ["np", "no problem", "anytime"]
+    - match: '(бувай|па[- ]?па|до зустрічі|пока|bye|cya|я пішов|я піду|ливаю)'
+      uk: ["бувай", "па", "до зустрічі", "гарної гри"]
+      ru: ["пока", "бывай"]
+      en: ["bye", "cya", "gn"]
+    - match: '^(х[аеи]х[аеи]?х*|ахах\S*|лол|lol|lmao|ржу\S*)$'
+      uk: ["хах", "ахах", "лол", "ну реально"]
+      ru: ["хах", "лол"]
+      en: ["lol", "haha"]
+    - match: '^(gg|гг)$'
+      uk: ["гг", "gg"]
+      ru: ["гг"]
+      en: ["gg", "gg wp"]
+    - match: '(допоможіть|допоможи|помогите|помоги|help me)'
+      uk: ["що треба?", "шо сталось?", "а що таке?", "що там?"]
+      ru: ["что надо?", "что случилось?"]
+      en: ["what do u need?", "what happened?"]
+    - match: '(є хто|хто тут|хто онлайн|хто є|есть кто|anyone)'
+      uk: ["я тут", "ну я є", "тут", "є"]
+      ru: ["я тут", "есть"]
+      en: ["im here", "yeah"]
+    - match: '(лаг|lag|тормозить|фризить|лагает)'
+      uk: ["у мене норм", "в мене ні", "хз в мене все ок", "мб в тебе інтернет"]
+      ru: ["у меня норм", "у меня нет"]
+      en: ["no lag for me", "maybe ur wifi"]
+    - match: '(обмін|обмен|трейд|trade|куплю|продам)'
+      uk: ["що міняєш?", "що треба?", "не маю зайвого", "хз що в мене є"]
+      ru: ["что меняешь?", "нет лишнего"]
+      en: ["what do u have?", "idk what i have"]
+
+# --- Персонажі (пул нікнеймів; в один момент онлайн лише count-min..count-max) ---
+# lang: uk / ru / en / pl.  skin-value/skin-signature - необов'язково (з mineskin.org),
+# без них клієнт покаже стандартний скін Steve/Alex за UUID.
+personas:
+  Sashko_Gamer:
+    lang: uk
+    style: "friendly, lazy typing, lowercase, light slang"
+  Dmytro2008:
+    lang: uk
+    style: "teen, short phrases, sometimes sarcastic"
+  Vlad_Craft:
+    lang: uk
+    style: "calm builder, polite, short"
+  Nazar_UA:
+    lang: uk
+    style: "pvp fan, energetic, slang"
+  Olya_Stone:
+    lang: uk
+    style: "friendly girl, kind, short"
+  TaRaS_PvP:
+    lang: uk
+    style: "joker, memes, lowercase"
+  Max_Builder:
+    lang: ru
+    style: "chill, short, casual"
+  Andriy_Play:
+    lang: uk
+    style: "quiet, answers briefly"
+
+# --- Готові фрази (якщо ШІ вимкнено/недоступний + спонтанний чат) ---
+phrases:
+  uk:
+    greetings: ["привіт", "ку", "хай", "o/", "здоров", "прив"]
+    unsure: ["хз", "не знаю", "без поняття", "хм хз", "десь бачив але не пам'ятаю"]
+    generic: ["лол", "ага", "та", "ну так", "реально", "хах", "мб", "ну хз", "згоден", "по ідеї так"]
+    idle: ["хто шо будує?", "нудно трохи", "десь алмази є взагалі", "скоро ресет?", "гг", "в кого є зайві стаки?", "о, ну ок"]
+  ru:
+    greetings: ["привет", "ку", "хай", "o/", "здарова"]
+    unsure: ["хз", "не знаю", "без понятия"]
+    generic: ["лол", "ага", "ну да", "реально", "хах", "мб", "согласен"]
+    idle: ["кто что строит?", "скучновато", "где алмазы вообще", "гг"]
+  en:
+    greetings: ["hi", "hey", "yo", "o/", "sup"]
+    unsure: ["idk", "no idea", "not sure"]
+    generic: ["lol", "yeah", "true", "fr", "haha", "maybe", "same"]
+    idle: ["anyone building?", "kinda boring", "where are diamonds lol", "gg"]
