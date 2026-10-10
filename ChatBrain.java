@@ -11,30 +11,47 @@ import org.bukkit.entity.Player;
 import java.util.*;
 import java.util.regex.Pattern;
 
-/** Вирішує, коли і що відповідають фейки; робить відповіді схожими на людські. */
+/**
+ * Керує поведінкою фейків у чаті.
+ * Відповідь: хмарна нейромережа (якщо ввімкнена) -> вбудований MiniBrain -> загальні фрази.
+ * Є "сесії розмови": якщо фейк почав говорити з гравцем, він продовжує відповідати йому далі.
+ */
 final class ChatBrain {
 
     private static final Pattern GREET = Pattern.compile(
             "(?iu)^(прив\\S*|хай|здоров\\S*|віта\\S*|ку|hi+|hello|hey|yo|добр\\S*)(\\s.*)?$");
+    private static final List<String> BAD = List.of("language model", "as an ai", "i'm an ai", "i am an ai",
+            "штучн", "нейромереж", "я бот", "я - бот", "assistant", "ассистент", "асистент", "openai", "chatgpt");
+
+    private static final class Session {
+        final FakeManager.Active fake;
+        long lastAt;
+        int turns;
+        long pendingUntil;
+        Session(FakeManager.Active fake) { this.fake = fake; }
+    }
 
     private final FakeCrowd plugin;
     private final FakeManager mgr;
     private final MiniBrain mini;
+    private final AiClient ai;
     private final Random rnd = new Random();
+    private final Map<String, Session> sessions = new HashMap<>();
+    private final Deque<String> history = new ArrayDeque<>();
     private long lastFakeMsg, lastAnyChat;
 
     ChatBrain(FakeCrowd plugin, FakeManager mgr) {
         this.plugin = plugin;
         this.mgr = mgr;
         this.mini = new MiniBrain(plugin, mgr);
+        this.ai = new AiClient(plugin);
     }
 
     void start() {
-        // автозбереження вивченого раз на 5 хв (асинхронно)
         Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, mini::save, 6000L, 6000L);
     }
-
     void reload() { mini.reload(); }
+    String stats() { return mini.stats(); }
     void shutdown() { mini.save(); }
 
     // ---------- події ----------
@@ -42,40 +59,62 @@ final class ChatBrain {
         long now = System.currentTimeMillis();
         lastAnyChat = now;
         mini.learn(sender, msg);
+        remember(sender + ": " + msg);
         List<FakeManager.Active> act = mgr.all();
-        if (act.isEmpty()) return;
+        if (act.isEmpty()) { sessions.clear(); return; }
         FileConfiguration c = plugin.getConfig();
+
+        String key = sender.toLowerCase(Locale.ROOT);
+        Session s = sessions.get(key);
+        long sessMs = c.getLong("chat.session-seconds", 150) * 1000L;
+        if (s != null && (!mgr.isActive(s.fake) || now - s.lastAt > sessMs
+                || s.turns >= c.getInt("chat.session-max-turns", 12))) {
+            sessions.remove(key);
+            s = null;
+        }
 
         String lower = msg.toLowerCase(Locale.ROOT);
         FakeManager.Active addressed = null;
         for (FakeManager.Active a : act) {
-            if (lower.contains(a.p.name.toLowerCase(Locale.ROOT))) { addressed = a; break; }
+            if (isMentioned(lower, a)) { addressed = a; break; }
         }
 
-        double chance = addressed != null ? c.getDouble("chat.mention-reply-chance", 0.9)
-                                          : c.getDouble("chat.reply-chance", 0.3);
-        if (rnd.nextDouble() > chance) return;
-
-        long global = c.getLong("chat.global-cooldown-seconds", 25) * 1000L;
-        long per = c.getLong("chat.per-fake-cooldown-seconds", 60) * 1000L;
-        if (addressed == null && now - lastFakeMsg < global) return;
-        if (addressed != null && now - lastFakeMsg < 4000L) return;
-
-        FakeManager.Active speaker = addressed;
-        if (speaker == null) {
+        FakeManager.Active speaker;
+        boolean direct = false;
+        if (addressed != null) {
+            if (rnd.nextDouble() > c.getDouble("chat.mention-reply-chance", 0.9)) return;
+            speaker = addressed; direct = true;
+        } else if (s != null) {
+            // продовження розмови: гравець пише далі після відповіді фейка
+            if (mentionsOtherPlayer(lower, sender)) return;
+            if (rnd.nextDouble() > c.getDouble("chat.session-reply-chance", 0.95)) return;
+            speaker = s.fake; direct = true;
+        } else {
+            if (rnd.nextDouble() > c.getDouble("chat.reply-chance", 0.3)) return;
+            long global = c.getLong("chat.global-cooldown-seconds", 25) * 1000L;
+            long per = c.getLong("chat.per-fake-cooldown-seconds", 60) * 1000L;
+            if (now - lastFakeMsg < global) return;
             List<FakeManager.Active> ok = new ArrayList<>();
             for (FakeManager.Active a : act) if (now - a.lastSpoke >= per) ok.add(a);
             if (ok.isEmpty()) return;
             speaker = ok.get(rnd.nextInt(ok.size()));
         }
+
+        if (s != null && s.pendingUntil > now) return;            // вже друкує відповідь цьому гравцю
+        if (now - speaker.lastSpoke < 2500L && direct) return;
+
+        Session ns = (s != null && s.fake == speaker) ? s : new Session(speaker);
+        ns.lastAt = now;
+        ns.pendingUntil = now + 30_000L;
+        sessions.put(key, ns);
         speaker.lastSpoke = now;
         lastFakeMsg = now;
-        respond(speaker, msg, null, addressed != null);
+        respond(speaker, ns, sender, msg, null, direct);
     }
 
     void onWhisper(Player from, FakeManager.Active fake, String msg) {
         if (rnd.nextDouble() > plugin.getConfig().getDouble("chat.private-reply-chance", 0.8)) return;
-        respond(fake, msg, from, true);
+        respond(fake, null, from.getName(), msg, from, true);
     }
 
     void onRealJoin(String name) {
@@ -87,7 +126,7 @@ final class ChatBrain {
         if (text == null) return;
         if (rnd.nextDouble() < 0.4) text = text + " " + name;
         final String t = text;
-        later(4000 + rnd.nextInt(8000), () -> deliver(sp, t, null));
+        later(4000 + rnd.nextInt(8000), () -> deliver(sp, null, t, null));
     }
 
     void idleTick() {
@@ -102,36 +141,62 @@ final class ChatBrain {
         String text = pick(sp.p.lang, "idle");
         if (text == null) return;
         lastFakeMsg = now;
-        later(text.length() * (110L + rnd.nextInt(110)), () -> deliver(sp, text, null));
+        later(text.length() * (110L + rnd.nextInt(110)), () -> deliver(sp, null, text, null));
     }
 
     // ---------- відповідь ----------
-    private void respond(FakeManager.Active sp, String msg, Player pmTo, boolean direct) {
-        later(1200 + rnd.nextInt(2500), () -> {   // "читає" повідомлення
-            if (!mgr.isActive(sp)) return;
-            String text = clean(mini.reply(sp.p.lang, msg));
-            if (text == null) {
-                double gen = plugin.getConfig().getDouble("brain.generic-reply-chance", 0.4);
-                if (!direct && rnd.nextDouble() > gen) return;
-                text = fallback(sp.p, msg);
-            }
-            if (text == null) return;
-            final String t = text;
-            later((long) t.length() * (110 + rnd.nextInt(110)), () -> deliver(sp, t, pmTo)); // "друкує"
+    private void respond(FakeManager.Active sp, Session ns, String sender, String msg, Player pmTo, boolean direct) {
+        later(1000 + rnd.nextInt(2000), () -> {   // "читає" повідомлення
+            if (!mgr.isActive(sp)) { release(ns); return; }
+            ai.ask(system(sp.p), userPrompt(sp.p, sender, msg, pmTo != null))
+              .thenAccept(raw -> Bukkit.getScheduler().runTask(plugin, () -> {
+                  if (!mgr.isActive(sp)) { release(ns); return; }
+                  String text = clean(raw);                                   // 1) нейромережа
+                  if (text == null) text = clean(mini.reply(sp.p.lang, msg, sender)); // 2) вбудований ШІ
+                  if (text == null) {                                         // 3) загальні фрази
+                      double gen = plugin.getConfig().getDouble("brain.generic-reply-chance", 0.4);
+                      if (!direct && rnd.nextDouble() > gen) { release(ns); return; }
+                      text = fallback(sp.p, msg);
+                  }
+                  if (text == null) { release(ns); return; }
+                  final String t = text;
+                  later((long) t.length() * (110 + rnd.nextInt(110)), () -> deliver(sp, ns, t, pmTo)); // "друкує"
+              }));
         });
     }
 
-    private void deliver(FakeManager.Active sp, String text, Player pmTo) {
+    private void release(Session ns) { if (ns != null) ns.pendingUntil = 0; }
+
+    private void deliver(FakeManager.Active sp, Session ns, String text, Player pmTo) {
+        if (ns != null) { ns.pendingUntil = 0; ns.lastAt = System.currentTimeMillis(); ns.turns++; }
         if (!mgr.isActive(sp)) return;
         sp.lastSpoke = System.currentTimeMillis();
         lastFakeMsg = sp.lastSpoke;
         if (pmTo == null) {
             Bukkit.broadcast(chatLine(sp.p.name, text));
+            remember(sp.p.name + ": " + text);
         } else if (pmTo.isOnline()) {
             pmTo.sendMessage(Component.translatable("commands.message.display.incoming",
                     Component.text(sp.p.name), Component.text(text))
                     .color(NamedTextColor.GRAY).decorate(TextDecoration.ITALIC));
         }
+    }
+
+    /** Повний нік або його "коротка" частина (Sashko_Gamer -> sashko, Dmytro2008 -> dmytro). */
+    private boolean isMentioned(String lower, FakeManager.Active a) {
+        String full = a.p.name.toLowerCase(Locale.ROOT);
+        if (lower.contains(full)) return true;
+        String shortName = full.split("[_\\d]+")[0];
+        if (shortName.length() < 4) return false;
+        return Pattern.compile("(?iu)(^|[^\\p{L}])" + Pattern.quote(shortName) + "([^\\p{L}]|$)").matcher(lower).find();
+    }
+
+    private boolean mentionsOtherPlayer(String lower, String sender) {
+        for (Player p : Bukkit.getOnlinePlayers()) {
+            if (p.getName().equalsIgnoreCase(sender)) continue;
+            if (p.getName().length() >= 4 && lower.contains(p.getName().toLowerCase(Locale.ROOT))) return true;
+        }
+        return false;
     }
 
     private Component chatLine(String name, String msg) {
@@ -143,15 +208,52 @@ final class ChatBrain {
                 .append(ser.deserialize(fmt.substring(i + 5)));
     }
 
+    // ---------- промпти для нейромережі ----------
+    private String system(FakeManager.Persona p) {
+        String lang = switch (p.lang) {
+            case "uk" -> "Ukrainian (casual, like in a game chat)";
+            case "ru" -> "Russian (casual)";
+            case "pl" -> "Polish (casual)";
+            default -> "English (casual)";
+        };
+        FileConfiguration c = plugin.getConfig();
+        return c.getString("ai.system-template", "You are a Minecraft player named %name%.")
+                .replace("%name%", p.name).replace("%language%", lang).replace("%style%", p.style)
+                .replace("%server-info%", c.getString("ai.server-info", ""));
+    }
+
+    private String userPrompt(FakeManager.Persona p, String sender, String msg, boolean priv) {
+        StringBuilder sb = new StringBuilder("Recent chat (oldest first):\n");
+        synchronized (history) { for (String h : history) sb.append(h).append('\n'); }
+        if (priv) sb.append("\n(").append(sender).append(" sent you a PRIVATE message: ").append(msg).append(")\n");
+        sb.append("\nWrite ONLY the next chat message from ").append(p.name)
+          .append(", replying to ").append(sender).append(". Match the language ").append(sender)
+          .append(" writes in.");
+        return sb.toString();
+    }
+
+    private void remember(String line) {
+        int max = plugin.getConfig().getInt("ai.history-lines", 8);
+        synchronized (history) {
+            history.addLast(line.length() > 140 ? line.substring(0, 140) : line);
+            while (history.size() > max) history.removeFirst();
+        }
+    }
+
     // ---------- постобробка (щоб не палилось) ----------
     private String clean(String raw) {
         if (raw == null) return null;
-        String s = raw.strip().replace("&", "").replace("§", "");
+        String s = raw.strip().lines().findFirst().orElse("").strip();
+        s = s.replaceFirst("^[\\w\\[\\]]{2,20}:\\s+", "");
+        s = s.replace("*", "").replace("&", "").replace("§", "");
+        s = s.replaceAll("^[\"'«“]+|[\"'»”]+$", "").strip();
         if (s.isEmpty()) return null;
         if (s.length() > 90) { int i = s.lastIndexOf(' ', 90); s = s.substring(0, i > 20 ? i : 90); }
+        String l = s.toLowerCase(Locale.ROOT);
+        for (String b : BAD) if (l.contains(b)) return null;
         if (rnd.nextDouble() < 0.7) s = Character.toLowerCase(s.charAt(0)) + s.substring(1);
         if (s.endsWith(".") && rnd.nextDouble() < 0.85) s = s.substring(0, s.length() - 1);
-        if (s.length() > 5 && rnd.nextDouble() < 0.05) { // рідкісна друкарська помилка
+        if (s.length() > 5 && rnd.nextDouble() < 0.05) {
             int i = 1 + rnd.nextInt(s.length() - 2);
             char[] ch = s.toCharArray();
             char t = ch[i]; ch[i] = ch[i + 1]; ch[i + 1] = t;

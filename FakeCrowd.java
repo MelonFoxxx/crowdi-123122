@@ -46,6 +46,7 @@ public final class FakeCrowd extends JavaPlugin {
             case "status" -> {
                 s.sendMessage("Active fakes: " + manager.all().stream()
                         .map(x -> x.p.name).collect(Collectors.joining(", ")));
+                s.sendMessage("Learned: " + brain.stats());
                 s.sendMessage("Displayed online base: " + manager.displayedOnline(Bukkit.getOnlinePlayers().size()));
             }
             default -> s.sendMessage("/fakecrowd <reload|status>");

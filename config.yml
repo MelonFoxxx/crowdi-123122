@@ -30,10 +30,52 @@ chat:
   per-fake-cooldown-seconds: 60
   private-reply-chance: 0.80     # відповідь на /msg фейку
   join-greet-chance: 0.35        # привітати реального гравця, що зайшов
+  session-seconds: 150           # скільки фейк "тримає розмову" з гравцем після відповіді
+  session-reply-chance: 0.95     # шанс відповісти, якщо гравець продовжує розмову
+  session-max-turns: 12          # макс. відповідей в одній розмові
   idle-chat:
     enabled: true
     chance: 0.15                 # перевірка кожні 20с
     min-silence-seconds: 180     # балакають самі, якщо в чаті тихо
+
+# --- Хмарна нейромережа (необов'язково; вбудований "ШІ" працює і без неї) ---
+# Працює через будь-який OpenAI-сумісний API (/chat/completions). Сервер не навантажує -
+# вся робота йде на чужих серверах. УВАГА: тексти чату надсилаються стороннім сервісам.
+# Потрібен API-ключ сервісу (багато сервісів мають безкоштовний рівень).
+# Приклади base-url: "https://api.groq.com/openai/v1", "https://openrouter.ai/api/v1",
+#                    "https://api.openai.com/v1". Назву моделі бери з документації сервісу.
+ai:
+  enabled: false
+  base-url: ""
+  api-key: ""
+  model: ""
+  max-tokens: 40
+  temperature: 0.9
+  timeout-seconds: 12
+  max-requests-per-minute: 20
+  history-lines: 8
+  # що нейромережа знає про сервер (щоб не вигадувала зайвого). Пиши своїми словами:
+  server-info: "A survival Minecraft server."
+  system-template: >
+    You are a normal teenager playing on a Minecraft server. Your nickname is %name%.
+    Write in %language%. Your style: %style%.
+    About the server: %server-info%
+    Reply with ONE very short chat message (1-10 words), like in a game chat.
+    No emojis, no quotes, no explanations, no nickname prefix.
+    Never say you are a bot, AI or assistant; if asked, deny it briefly or joke.
+    Do not invent facts about the server. If you don't know something, say you don't know.
+
+# --- Ніки фейків в автодоповненні команд (Tab) ---
+# /tp, /msg, /w вбудованої Minecraft підказує ніки з табу сам, тому фейки там уже є.
+# Цей список - для команд плагінів (EssentialsX тощо), які доповнює сервер.
+tab-complete:
+  commands: [tpa, tpahere, tpask, call, msg, tell, w, whisper, m, t, pm, pay, seen, tpo, tp, teleport]
+
+# --- Команди, спрямовані на фейка ---
+fake-commands:
+  tpa-commands: [tpa, tpahere, tpask, call]    # працює лише якщо така команда є на сервері
+  tpa-sent: "&6Request sent to &c%name%&6."    # підлаштуй під повідомлення твого плагіна
+  tpa-deny: ""                                  # напр. "&c%name% denied your request." (порожньо = мовчання)
 
 # --- Вбудований "ШІ" (працює всередині плагіна, нічого додатково ставити не треба) ---
 brain:
@@ -44,6 +86,62 @@ brain:
   # слова (початок слова), які НЕ вчимо. Додай сюди мати, рекламу, назви чужих серверів тощо
   blocked-words: [admin, адмін, админ, донат, donat, ip, discord, дискорд, привілег, http]
   # Правила: match - регулярка; далі списки відповідей для мов uk/ru/en/pl
+  similarity-threshold: 0.4      # наскільки схожим має бути повідомлення, щоб взяти вивчену відповідь (0..1)
+  markov-chance: 0.7             # шанс скласти власне речення з вивчених слів
+  min-corpus-for-markov: 40      # скільки фраз треба вивчити, перш ніж складати власні речення
+  max-learned-sentences: 4000
+  # Шаблонні відповіді за типом питання. {n}=число, {kw}=слово з розмови, {player}=ім'я іншого гравця
+  answers:
+    yesno:
+      uk: ["так", "ні", "мб", "хз", "ага", "та ні", "ну так", "не думаю", "певно що так", "ні лол"]
+      ru: ["да", "нет", "мб", "хз", "ага", "та нет", "наверное"]
+      en: ["yes", "no", "maybe", "idk", "yeah", "nah", "prob"]
+    why:
+      uk: ["хз чому", "бо так вийшло", "а я звідки знаю", "мб баг", "бо так", "не знаю чого"]
+      ru: ["хз почему", "потому что так", "мб баг", "не знаю"]
+      en: ["idk why", "just because", "maybe a bug", "no idea"]
+    where:
+      uk: ["хз де", "десь біля спавну", "глянь на мапі", "не пам'ятаю де", "та десь там", "я бачив десь на півночі"]
+      ru: ["хз где", "где-то у спавна", "глянь на карте", "не помню где"]
+      en: ["idk where", "somewhere near spawn", "check the map", "dont remember"]
+    when:
+      uk: ["скоро", "хз коли", "мб завтра", "через хвилин {n}", "та вже скоро"]
+      ru: ["скоро", "хз когда", "мб завтра", "через {n} минут"]
+      en: ["soon", "idk when", "maybe tomorrow", "in like {n} min"]
+    who:
+      uk: ["хз хто", "не знаю хто", "мб {player}", "здається {player}", "та я не знаю"]
+      ru: ["хз кто", "не знаю кто", "мб {player}", "кажется {player}"]
+      en: ["idk who", "maybe {player}", "no idea who"]
+    howmany:
+      uk: ["штук {n}", "{n}", "багато", "мало", "десь {n}", "не рахував"]
+      ru: ["штук {n}", "{n}", "много", "мало", "не считал"]
+      en: ["like {n}", "{n}", "a lot", "not many", "didnt count"]
+    how:
+      uk: ["та по різному", "хз як", "треба пробувати", "а я не знаю як", "ну як-як, просто"]
+      ru: ["да по разному", "хз как", "надо пробовать", "не знаю как"]
+      en: ["depends", "idk how", "just try it", "no idea how"]
+    what:
+      uk: ["{kw}? хз", "не знаю що це", "та нічого особливого", "хз шо {kw}", "ну {kw}, і що"]
+      ru: ["{kw}? хз", "не знаю что это", "да ничего особого"]
+      en: ["{kw}? idk", "no idea what that is", "nothing special"]
+    request:
+      uk: ["та в мене самого нема", "ні) сам шукаю", "ну не знаю", "в мене нема зайвого", "пізніше мб"]
+      ru: ["у меня самого нет", "нет) сам ищу", "ну не знаю", "позже мб"]
+      en: ["i dont have extra", "nah im looking too", "maybe later"]
+    praise:
+      uk: ["кайф", "ого круто", "ага норм", "ну так", "точно"]
+      ru: ["кайф", "ого круто", "ага норм", "точно"]
+      en: ["nice", "thats cool", "true", "fr"]
+    complain:
+      uk: ["та ну(", "біда", "ну таке", "ага жесть", "співчуваю"]
+      ru: ["да ну(", "беда", "ну такое", "жесть"]
+      en: ["oof", "that sucks", "yeah rough"]
+    insult:
+      uk: ["сам такий", "ну і шо?", "ти чого?", "та ладно тобі", "ну ок"]
+      ru: ["сам такой", "ну и что?", "ты чего?", "ладно тебе"]
+      en: ["u too", "ok and?", "chill", "lol ok"]
+    filler:
+      uk: ["та", "ну", "о", "ага", "мб", "а"]
   intents:
     - match: '^(прив\S*|хай|здоров\S*|віта\S*|ку|hi+|hello|hey|yo|добр\S*|здарова|прівіт)(\s.*)?$'
       uk: ["привіт", "ку", "хай", "o/", "здоров", "прив)"]
@@ -89,6 +187,19 @@ brain:
       uk: ["що міняєш?", "що треба?", "не маю зайвого", "хз що в мене є"]
       ru: ["что меняешь?", "нет лишнего"]
       en: ["what do u have?", "idk what i have"]
+
+    - match: '(що|шо) (ти )?(робиш|робите|будуєш|копаєш)|чим займаєшся|what (are )?(you|u|r u) doing|что (ты )?делаешь'
+      uk: ["та хату будую", "шахту копаю", "ферму роблю", "ходжу по світу", "нічо особливого", "шукаю алмази"]
+      ru: ["дом строю", "копаю шахту", "ферму делаю", "ничего особого"]
+      en: ["building a house", "mining", "just chilling", "farming"]
+    - match: '^(а ти|а ви|а в тебе|а у тебе|а у вас|and you|u\?|and u|а ты)\??$'
+      uk: ["я теж", "в мене норм", "та так само", "та також"]
+      ru: ["я тоже", "у меня норм", "так же"]
+      en: ["same", "me too", "im good"]
+    - match: '(скільки (тобі )?років|сколько (тебе )?лет|how old (are )?(you|u)|де ти живеш|звідки ти|откуда ты)'
+      uk: ["не скажу)", "та навіщо тобі", "а тобі нащо?", "це секрет"]
+      ru: ["не скажу)", "а тебе зачем?", "это секрет"]
+      en: ["wont say", "why u asking", "its a secret"]
 
 # --- Персонажі (пул нікнеймів; в один момент онлайн лише count-min..count-max) ---
 # lang: uk / ru / en / pl.  skin-value/skin-signature - необов'язково (з mineskin.org),
